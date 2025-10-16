@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+// Assurez-vous d'importer le Leaderboard ici (ou de le coller si vous travaillez dans un seul fichier)
+import Leaderboard from "./LeaderBoard"; 
 
 interface Props {
   onGameEnd: (score: number) => void;
@@ -12,98 +14,187 @@ const RCPSimulator: React.FC<Props> = ({ onGameEnd }) => {
   const [lastTime, setLastTime] = useState<number | null>(null);
   const [color, setColor] = useState("lightgray");
   const [gameOver, setGameOver] = useState(false);
+  const [isCompressed, setIsCompressed] = useState(false); 
   const [targetInterval, setTargetInterval] = useState(550);
+  
   const rhythmRef = useRef<number[]>([]);
   const audioRef = useRef<HTMLAudioElement>(null);
   const callAudioRef = useRef<HTMLAudioElement>(null);
   const gameEndedRef = useRef(false);
+  const timeLeftRef = useRef(30);
+  const timerRef = useRef<number | null>(null); 
+  const animationTimerRef = useRef<number | null>(null); 
 
-  // Ritmo variable cada 5s
+  // Fonction pour réinitialiser le jeu
+  const handleRestart = () => {
+    setStep(1);
+    setCompressions(0);
+    setCorrectCompressions(0);
+    setTimeLeft(30);
+    setLastTime(null);
+    setColor("lightgray");
+    setGameOver(false);
+    setIsCompressed(false);
+    setTargetInterval(550);
+    rhythmRef.current = [];
+    gameEndedRef.current = false;
+    timeLeftRef.current = 30;
+
+    if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+    }
+    if (animationTimerRef.current) {
+        window.clearTimeout(animationTimerRef.current);
+        animationTimerRef.current = null;
+    }
+  };
+
+  // 1. Rythme variable (logique conservée)
   useEffect(() => {
-    const interval = setInterval(() => {
-      setTargetInterval(400 + Math.random() * 300);
+    if (step !== 3) return;
+
+    const intervalId = window.setInterval(() => {
+      setTargetInterval(500 + Math.random() * 100);
     }, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    return () => window.clearInterval(intervalId);
+  }, [step]);
 
-  // Inicializar lastTime al empezar el paso 3
+  // 2. Logique du temporisateur (Correction du bug de réinitialisation conservée)
   useEffect(() => {
-    if (step === 3 && lastTime === null) {
-      setLastTime(Date.now());
-    }
-  }, [step, lastTime]);
+    if (step === 3 && !gameOver) {
+      if (timerRef.current) return; 
 
-  // Temporizador
-  useEffect(() => {
-    if (step === 3 && timeLeft > 0) {
-      const timer = setInterval(() => setTimeLeft(t => t - 1), 1000);
-      return () => clearInterval(timer);
-    } else if (step === 3 && timeLeft === 0 && !gameEndedRef.current) {
-      setGameOver(true);
-      gameEndedRef.current = true;
-      setTimeout(() => onGameEnd(correctCompressions), 1000);
-    }
-  }, [step, timeLeft, correctCompressions, onGameEnd]);
+      if (lastTime === null) {
+        setLastTime(Date.now());
+      }
+      
+      timeLeftRef.current = timeLeft;
 
-  // Sonido y vibración en paso 2
+      timerRef.current = window.setInterval(() => {
+        timeLeftRef.current -= 1;
+        setTimeLeft(timeLeftRef.current);
+
+        if (timeLeftRef.current <= 0) {
+          if (timerRef.current) window.clearInterval(timerRef.current);
+          if (!gameEndedRef.current) {
+            setGameOver(true);
+            gameEndedRef.current = true;
+            
+            setCorrectCompressions(finalCorrectCompressions => {
+                setTimeout(() => onGameEnd(finalCorrectCompressions), 500); 
+                return finalCorrectCompressions;
+            });
+          }
+        }
+      }, 1000);
+    }
+
+    return () => {
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [step, gameOver, onGameEnd]); 
+
+  // 3. Son et vibration (logique conservée)
   useEffect(() => {
     if (step === 2) {
       if (callAudioRef.current) {
         callAudioRef.current.loop = true;
-        callAudioRef.current.play();
+        callAudioRef.current.play().catch(e => console.error("Audio play failed:", e));
       }
       if (navigator.vibrate) {
-        const vibrateInterval = setInterval(() => navigator.vibrate([100, 50, 100]), 600);
+        const vibrateInterval = window.setInterval(() => navigator.vibrate([100, 50, 100]), 600);
         return () => {
-          clearInterval(vibrateInterval);
+          window.clearInterval(vibrateInterval);
           navigator.vibrate(0);
         };
       }
     } else {
-      if (callAudioRef.current) callAudioRef.current.pause();
+      if (callAudioRef.current) {
+         callAudioRef.current.pause();
+         callAudioRef.current.currentTime = 0;
+      }
     }
   }, [step]);
 
   const handleNextStep = () => setStep(step + 1);
 
+  // 4. Gestion de la compression et de l'animation (logique conservée)
   const handleCompression = useCallback(() => {
+    if (step !== 3 || gameOver) return;
+
     setCompressions(c => c + 1);
 
     if (audioRef.current) {
       audioRef.current.currentTime = 0;
-      audioRef.current.play();
+      audioRef.current.play().catch(e => console.error("Audio play failed:", e));
     }
 
     const now = Date.now();
+
     if (lastTime) {
       const diff = now - lastTime;
+      const margin = 100;
 
-      // Guardar solo últimos 50 intervalos
       rhythmRef.current.push(diff);
       if (rhythmRef.current.length > 50) rhythmRef.current.shift();
 
-      if (diff >= targetInterval - 150 && diff <= targetInterval + 150) {
+      if (diff >= targetInterval - margin && diff <= targetInterval + margin) {
         setColor("green");
         setCorrectCompressions(c => c + 1);
       } else {
         setColor("red");
       }
+    } else {
+      setColor("green");
+      setCorrectCompressions(c => c + 1);
     }
     setLastTime(now);
-  }, [lastTime, targetInterval]);
+
+    // LOGIQUE D'ANIMATION
+    setIsCompressed(true); 
+
+    if (animationTimerRef.current) {
+        window.clearTimeout(animationTimerRef.current);
+    }
+
+    animationTimerRef.current = window.setTimeout(() => {
+        setIsCompressed(false);
+    }, 100); 
+
+  }, [lastTime, targetInterval, step, gameOver]);
+
+  // Nettoyage lors du démontage du composant (logique conservée)
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) window.clearInterval(timerRef.current);
+      if (animationTimerRef.current) window.clearTimeout(animationTimerRef.current); 
+      if (callAudioRef.current) callAudioRef.current.pause();
+      if (navigator.vibrate) navigator.vibrate(0);
+    };
+  }, []);
+
+  // --- Rendu (HTML/JSX) ---
+
+  // Si le jeu est terminé, on affiche le Leaderboard.
+  if (gameOver) {
+    return (
+        <Leaderboard score={correctCompressions} onRestart={handleRestart} />
+    );
+  }
 
   return (
     <div style={{ marginTop: "20px", textAlign: "center" }}>
       <audio ref={audioRef} src="https://www.soundjay.com/button/beep-07.mp3" preload="auto" />
       <audio ref={callAudioRef} src="https://www.soundjay.com/phone/phone-ring-1.mp3" preload="auto" />
 
+      {/* Rendu des étapes 1, 2, et 3 (conservé) */}
       {step === 1 && (
-        <div>
-          <p>1️⃣ Verifica si la persona está consciente y respira.</p>
-          <button onClick={handleNextStep}>Siguiente</button>
-        </div>
+        <div><p>1️⃣ Verifica si la persona está consciente y respira.</p><button onClick={handleNextStep}>Siguiente</button></div>
       )}
-
       {step === 2 && (
         <div>
           <p>2️⃣ Llama a los servicios de emergencia</p>
@@ -115,47 +206,32 @@ const RCPSimulator: React.FC<Props> = ({ onGameEnd }) => {
 
       {step === 3 && !gameOver && (
         <div>
+          {/* SUPPRESSION DES ** */}
           <p>3️⃣ Compresiones totales: {compressions}</p>
           <p>Compresiones correctas: {correctCompressions}</p>
           <p>Tiempo restante: {timeLeft}s</p>
 
-          {/* Muñeco */}
           <div
             onClick={handleCompression}
             onTouchStart={(e) => { e.preventDefault(); handleCompression(); }}
             style={{
-              margin: "20px auto",
-              width: "150px",
-              height: "200px",
-              borderRadius: "10px",
-              backgroundColor: color,
-              display: "flex",
-              alignItems: "flex-end",
-              justifyContent: "center",
-              userSelect: "none",
+              margin: "20px auto", width: "150px", height: "200px", borderRadius: "10px", backgroundColor: color,
+              display: "flex", alignItems: "flex-end", justifyContent: "center", userSelect: "none",
               transition: "background-color 0.2s, transform 0.1s",
-              transform: `scaleY(${1 - (compressions % 2) * 0.1})`,
+              transform: `scaleY(${isCompressed ? 0.9 : 1})`, 
             }}
           >
             <div style={{ width: "50px", height: "50px", backgroundColor: "#ffaaaa", borderRadius: "50%", marginBottom: "10px" }} />
           </div>
 
-          {/* Barra de ritmo dinámica */}
+          <p>Taux cible : {Math.round(60000 / targetInterval)}/min</p>
           <div style={{ width: "200px", height: "20px", backgroundColor: "#ddd", margin: "10px auto", borderRadius: "10px", overflow: "hidden", display: "flex" }}>
-            {Array.from({ length: Math.min(compressions, 30) }).map((_, i) => {
-              const idx = compressions - 30 + i >= 0 ? compressions - 30 + i : i;
-              return <div key={i} style={{ flex: 1, margin: "0 1px", backgroundColor: idx < correctCompressions ? "green" : "red", transition: "background-color 0.2s" }} />;
-            })}
+            {Array.from({ length: 10 }).map((_, i) => (
+                <div key={i} style={{ flex: 1, margin: "0 1px", backgroundColor: color, transition: "background-color 0.2s" }} />
+            ))}
           </div>
 
           <p>Toca o haz clic en el pecho al ritmo correcto</p>
-        </div>
-      )}
-
-      {gameOver && (
-        <div style={{ marginTop: "30px", animation: "fadeIn 1s" }}>
-          <h2>🎉 ¡Juego terminado! 🎉</h2>
-          <p>Compresiones correctas: {correctCompressions}</p>
         </div>
       )}
 
